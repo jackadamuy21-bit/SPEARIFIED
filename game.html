@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spearified - No npm required!</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #87ceeb, #98fb98);
+            color: white;
+            overflow: hidden;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.7);
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 300px;
+        }
+
+        #chat {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        input, button {
+            padding: 8px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+        }
+
+        button {
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+
+        .obstacle {
+            position: absolute;
+            border-radius: 50%;
+            opacity: 0.7;
+        }
+
+        .tree { background: green; }
+        .building { background: gray; }
+        .dune { background: #D2B48C; border-radius: 20%; }
+        .cactus { background: green; width: 6px !important; height: 20px !important; border-radius: 3px; }
+        .mountain { background: #8B4513; border-radius: 20%; }
+        .rock { background: #696969; border-radius: 30%; }
+        .palm { background: green; width: 8px !important; height: 25px !important; border-radius: 4px; }
+        .rocks { background: #708090; border-radius: 40%; }
+        .station { background: silver; border-radius: 10%; }
+        .satellite { background: #C0C0C0; width: 12px !important; height: 12px !important; }
+        .coral { background: #FF69B4; border-radius: 60%; }
+        .shipwreck { background: #8B4513; width: 30px !important; height: 15px !important; border-radius: 5px; }
+        .castle { background: #DAA520; border-radius: 15%; }
+        .tower { background: #CD853F; width: 16px !important; height: 30px !important; border-radius: 8px; }
+        .wall { background: #F5DEB3; width: 25px !important; height: 8px !important; border-radius: 4px; }
+        .volcano { background: #8B0000; border-radius: 40%; }
+        .lava { background: #FF4500; border-radius: 50%; animation: glow 2s ease-in-out infinite alternate; }
+
+        @keyframes glow {
+            from { box-shadow: 0 0 5px #FF4500; }
+            to { box-shadow: 0 0 20px #FF4500, 0 0 30px #FF4500; }
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="ui">
+            <h2>Spearified</h2>
+            <div id="status">Connecting...</div>
+            <div id="players"></div>
+        </div>
+
+        <div id="chat">
+            <div id="messages"></div>
+            <input type="text" id="chat-input" placeholder="Type to chat...">
+            <button onclick="sendChat()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let playerId = 'player_' + Math.random().toString(36).substr(2, 9);
+        let username = prompt('Enter your username:', 'Player' + Math.floor(Math.random() * 1000));
+
+        const gameContainer = document.getElementById('game-container');
+        const statusDiv = document.getElementById('status');
+        const playersDiv = document.getElementById('players');
+        const messagesDiv = document.getElementById('messages');
+        const chatInput = document.getElementById('chat-input');
+
+        // Movement
+        let keys = {};
+        let playerX = 0, playerY = 0;
+
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+        });
+
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        function connect() {
+            ws = new WebSocket('ws://localhost:8765');
+
+            ws.onopen = () => {
+                statusDiv.textContent = `Connected as ${username}`;
+                ws.send(JSON.stringify({
+                    type: 'join',
+                    player_id: playerId,
+                    username: username
+                }));
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleMessage(data);
+            };
+
+            ws.onclose = () => {
+                statusDiv.textContent = 'Disconnected. Reconnecting...';
+                setTimeout(connect, 3000);
+            };
+        }
+
+        function handleMessage(data) {
+            if (data.type === 'game_state') {
+                updateGame(data.data);
+            } else if (data.type === 'chat') {
+                addMessage(`${data.username}: ${data.message}`);
+            }
+        }
+
+        function updateGame(state) {
+            // Clear old players
+            document.querySelectorAll('.player').forEach(p => p.remove());
+
+            // Update players list
+            playersDiv.innerHTML = '<h3>Players:</h3>';
+            state.players.forEach(player => {
+                let className = 'normal';
+                if (state.game_mode === 'tag' && player.is_tagger) className = 'tagger';
+                if (state.game_mode === 'zombie' && player.is_zombie) className = 'zombie';
+                if (state.game_mode === 'bomb' && player.id === state.bomb_holder) className = 'bomb-holder';
+
+                const playerDiv = document.createElement('div');
+                playerDiv.className = `player ${className}`;
+                playerDiv.style.left = `${400 + player.x * 2}px`;
+                playerDiv.style.top = `${300 + player.z * 2}px`;
+                playerDiv.title = player.username;
+                gameContainer.appendChild(playerDiv);
+
+                playersDiv.innerHTML += `<div>${player.username} (${player.kills}K/${player.deaths}D)</div>`;
+            });
+
+            // Update status
+            let modeText = state.game_mode.toUpperCase();
+            if (state.game_mode === 'bomb' && state.bomb_timer > 0) {
+                modeText += ` - Bomb: ${Math.ceil(state.bomb_timer / 1000)}s`;
+            }
+            statusDiv.innerHTML = `Mode: ${modeText}`;
+        }
+
+        function sendChat() {
+            const message = chatInput.value.trim();
+            if (message && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'chat',
+                    message: message
+                }));
+                chatInput.value = '';
+            }
+        }
+
+        function addMessage(message) {
+            const div = document.createElement('div');
+            div.textContent = message;
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // Movement update loop
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                let dx = 0, dz = 0;
+                if (keys['w']) dz -= 1;
+                if (keys['s']) dz += 1;
+                if (keys['a']) dx -= 1;
+                if (keys['d']) dx += 1;
+
+                if (dx !== 0 || dz !== 0) {
+                    playerX += dx * 0.5;
+                    playerY += dz * 0.5;
+
+                    ws.send(JSON.stringify({
+                        type: 'move',
+                        x: playerX,
+                        y: 1,
+                        z: playerY
+                    }));
+                }
+            }
+        }, 50);
+
+        // Enter to send chat
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendChat();
+            }
+        });
+
+        connect();
+    </script>
+</body>
+</html>
